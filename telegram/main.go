@@ -175,7 +175,7 @@ var (
 	HTTPTimeout = 30 * time.Second
 	UserAgent   = "Mozilla/5.0 (compatible; AddisBot/1.0; +https://example.com)"
 
-	NotifyChatID int64 = -5132012623
+	NotifyChatID int64 = -5170665254
 
 	// Require credited party to be this exact person (tokenized match)
 	AllowedTelebirrReceiverName = getenvDefault("ALLOWED_RECEIVER_TELEBIRR", "niguse derse Dameta")
@@ -4130,7 +4130,7 @@ func main() {
 			bot.Send(tgbotapi.NewMessage(chatID, "Support: @l8rrl5oii7"))
 			continue
 		case "👥 Join Us":
-			bot.Send(tgbotapi.NewMessage(chatID, "Join our channel: t.me/direbingo"))
+			bot.Send(tgbotapi.NewMessage(chatID, "Join our channel: at LucyBingoOfficial"))
 			continue
 		}
 
