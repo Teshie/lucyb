@@ -4127,7 +4127,7 @@ func main() {
 			bot.Send(tgbotapi.NewMessage(chatID, "Pick a stake → choose a board → select numbers."))
 			continue
 		case "☎️ Contact Us":
-			bot.Send(tgbotapi.NewMessage(chatID, "Support: @l8rrl5oii7"))
+			bot.Send(tgbotapi.NewMessage(chatID, "Support: @Suporti9"))
 			continue
 		case "👥 Join Us":
 			bot.Send(tgbotapi.NewMessage(chatID, "Join our channel: at LucyBingoOfficial"))
