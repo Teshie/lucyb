@@ -70,13 +70,14 @@ type TelebirrSMS struct {
 }
 
 type TelebirrReceipt struct {
-	InvoiceNo         string
-	PaymentDate       string
-	SettledAmount     string
-	PayerName         string
-	CreditedPartyName string
-	Link              string
-	Source            string // "receipt" or "sms"
+	InvoiceNo            string
+	PaymentDate          string
+	SettledAmount        string
+	PayerName            string
+	CreditedPartyName    string
+	CreditedPartyAccount string // Telebirr→bank: destination account on receipt (may be partial)
+	Link                 string
+	Source               string // "receipt" or "sms"
 
 	Debug map[string]string `json:"debug,omitempty"`
 }
@@ -95,6 +96,28 @@ type CBEReceipt struct {
 	TotalDebited      string
 	Link              string
 	Source            string // "cbe"
+}
+
+// BOAReceipt is populated from Bank of Abyssinia online slip API (cs.bankofabyssinia.com).
+type BOAReceipt struct {
+	TxID              string
+	PaymentDate       string
+	TransferredAmount string
+	PayerName         string
+	ReceiverName      string
+	Link              string
+	Source            string // "boa"
+}
+
+// AwashReceipt is parsed from Awash Bank HTML receipts (awashpay.awashbank.com).
+type AwashReceipt struct {
+	TxID              string
+	PaymentDate       string
+	TransferredAmount string
+	PayerName         string
+	ReceiverName      string
+	Link              string
+	Source            string // "awash"
 }
 
 type sharePhoneResp struct {
@@ -129,7 +152,7 @@ type depositSession struct {
 
 	// Referral
 	StartParam      string // e.g. "ref_397753549"
-	SelectedMethod  string // "telebirr" | "ebirr" | "cbe" | ""
+	SelectedMethod  string // "telebirr" | "ebirr" | "cbe" | "boa" | "awash" | ""
 	TransferToLabel string // e.g. "@user" or "09xxxxxxx"
 
 	// Bonus
@@ -148,16 +171,17 @@ type depositSession struct {
 
 /* ===================== Config ===================== */
 var (
-	APIBase               = getenvDefault("API_BASE", "https://lucyb.tabia.site")
+	APIBase               = getenvDefault("API_BASE", "https://henb.teshie.dev")
 	AdminSupergroup int64 = -1002877017597
 
 	PayeeName  = "Henok"
-	PayeePhone = "0985936645"
+	PayeePhone = "0915418674"
 
-	TelebirrAgentAcct  = "0985936645"
-	NigedBankAgentAcct = "1000091369447"
-	EBIRRAgentAcct     = "0985936645"
+	TelebirrAgentAcct  = "0920031493"
+	NigedBankAgentAcct = "1000255224108"
+	EBIRRAgentAcct     = "0920031493"
 	AbyssiniaAgentAcct = "147857373"
+	AwashAgentAcct     = getenvDefault("AWASH_AGENT_ACCT", "01320692405700")
 
 	SupportHandle1 = "@"
 	SupportHandle2 = "@"
@@ -170,6 +194,7 @@ var (
 	CBEAllowedHost     = "apps.cbe.com.et"
 	CBENewAllowedHost  = "mbreciept.cbe.com.et"
 	BOAAllowedHost     = "cs.bankofabyssinia.com"
+	AwashAllowedHost   = "awashpay.awashbank.com"
 	EBirrAllowedHost   = "transactioninfo.ebirr.com" // NEW
 
 	HTTPTimeout = 30 * time.Second
@@ -178,9 +203,10 @@ var (
 	NotifyChatID int64 = -5170665254
 
 	// Require credited party to be this exact person (tokenized match)
-	AllowedTelebirrReceiverName = getenvDefault("ALLOWED_RECEIVER_TELEBIRR", "niguse derse Dameta")
-	AllowedCBEBirrReceiverName  = getenvDefault("ALLOWED_RECEIVER_CBE", "NIGUSS DIRESS DAMITIE")
+	AllowedTelebirrReceiverName = getenvDefault("ALLOWED_RECEIVER_TELEBIRR", "yihanew nigus tamiru")
+	AllowedCBEBirrReceiverName  = getenvDefault("ALLOWED_RECEIVER_CBE", "YIHENEW  NIGUSSIE TAMIRU")
 	AllowedBOAReceiverName      = getenvDefault("ALLOWED_RECEIVER_BOA", "HENOK BELAY MANDEFRO")
+	AllowedAwashReceiverName    = getenvDefault("ALLOWED_RECEIVER_AWASH", "HENOK BELAY MANDEFRO")
 	AllowedEBirrReceiverName    = getenvDefault("ALLOWED_RECEIVER_EBIRR", "niguse derse Dameta")
 	CBEMobileAPIBase            = getenvDefault("CBE_MOBILE_API_BASE", "https://mb.cbe.com.et")
 	CBEMobileAppID              = getenvDefault("CBE_MOBILE_APP_ID", "d1292e42-7400-49de-a2d3-9731caa4c819")
@@ -219,6 +245,10 @@ func methodFromReceiptURL(raw string) string {
 		return "telebirr"
 	case strings.ToLower(CBEAllowedHost), strings.ToLower(CBENewAllowedHost):
 		return "cbe"
+	case strings.ToLower(BOAAllowedHost):
+		return "boa"
+	case strings.ToLower(AwashAllowedHost):
+		return "awash"
 	default:
 		return ""
 	}
@@ -234,10 +264,12 @@ func jsonDebug(v any) string {
 }
 func extractDate(input string) string {
 	patterns := []string{
-		`\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}\s*[+-]\d{4}`,         // 2026/02/20 11:46:59 +0300
-		`\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}`,                     // 2026/02/20 11:46:59
-		`\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}`,                     // 20-02-2026 11:20:27
-		`\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2}`,                     // 20/02/2026 17:16:23
+		`\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}\s*[+-]\d{4}`,               // 2026/02/20 11:46:59 +0300
+		`\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}`,                           // 2026/02/20 11:46:59
+		`\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}`,                           // Awash: 2026-02-28 20:33:10
+		`\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}`,                           // 20-02-2026 11:20:27
+		`\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2}`,                           // 20/02/2026 17:16:23
+		`\d{1,2}/\d{1,2}/\d{2}\s+\d{1,2}:\d{2}(?::\d{2})?`,                // BOA: 06/04/26 19:04
 		`\d{1,2}/\d{1,2}/\d{4}[,\s]+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)`, // 2/20/2026, 6:00:00 PM
 	}
 
@@ -260,19 +292,22 @@ func extractDate(input string) string {
 func parseFlexibleDate(dateStr string) (time.Time, error) {
 	// Normalize multiple spaces to single space
 	dateStr = regexp.MustCompile(`\s+`).ReplaceAllString(strings.TrimSpace(dateStr), " ")
-	
+
 	// Handle comma after date if present
 	dateStr = strings.ReplaceAll(dateStr, ",", " ")
 
 	layouts := []string{
 		"2006/01/02 15:04:05 -0700",
 		"2006/01/02 15:04:05",
+		"2006-01-02 15:04:05", // Awash slip
 		"02-01-2006 15:04:05",
 		"02/01/2006 15:04:05",
-		"1/2/2006 15:04:05 PM",  // Added for format with seconds and AM/PM
-		"1/2/2006 3:04:05 PM",    // This should match "2/20/2026 6:00:00 PM"
+		"02/01/06 15:04:05",    // BOA slip: DD/MM/YY HH:MM:SS (if seconds present)
+		"02/01/06 15:04",       // BOA slip: DD/MM/YY HH:MM
+		"1/2/2006 15:04:05 PM", // Added for format with seconds and AM/PM
+		"1/2/2006 3:04:05 PM",  // This should match "2/20/2026 6:00:00 PM"
 		"1/2/2006 3:04 PM",
-		"1/2/2006 15:04:05",      // 24-hour format without AM/PM
+		"1/2/2006 15:04:05", // 24-hour format without AM/PM
 	}
 
 	loc := time.Now().Location()
@@ -283,7 +318,7 @@ func parseFlexibleDate(dateStr string) (time.Time, error) {
 		if err == nil {
 			return t, nil
 		}
-		
+
 		// Try with location
 		t, err = time.ParseInLocation(layout, dateStr, loc)
 		if err == nil {
@@ -314,6 +349,7 @@ func isWithinLastDays(input string, days int) (bool, error) {
 	cutoff := time.Now().AddDate(0, 0, -days)
 	return !parsedTime.Before(cutoff), nil
 }
+
 // Add this function in the utils section
 // func isWithinLastDays(dateStr string, days int) (bool, error) {
 // 	if dateStr == "" {
@@ -352,8 +388,9 @@ func isWithinLastDays(input string, days int) (bool, error) {
 // 	// Cutoff: N days ago
 // 	cutoff := time.Now().AddDate(0, 0, -days)
 
-// 	return parsedTime.After(cutoff) || parsedTime.Equal(cutoff), nil
-// }
+//		return parsedTime.After(cutoff) || parsedTime.Equal(cutoff), nil
+//	}
+//
 // normalizePersonName already lowercases & trims; this one extracts tokens.
 func nameTokens(s string) []string {
 	s = strings.ToLower(strings.TrimSpace(s))
@@ -552,13 +589,17 @@ func expectedReceiverByMethod(method string) []string {
 		return []string{AllowedTelebirrReceiverName}
 	case "cbe", "cbe-birr", "cbe_birr", "cbe birr":
 		return []string{AllowedCBEBirrReceiverName}
+	case "boa":
+		return []string{AllowedBOAReceiverName}
+	case "awash":
+		return []string{AllowedAwashReceiverName}
 	case "ebirr", "e-birr", "e_birr", "e birr":
 		// accept any of the known EBirr variants
 		return ebirrReceiverVariants()
 	default:
 		// conservative fallback: allow match to any known expected name
 		return append(
-			[]string{AllowedTelebirrReceiverName, AllowedCBEBirrReceiverName},
+			[]string{AllowedTelebirrReceiverName, AllowedCBEBirrReceiverName, AllowedBOAReceiverName, AllowedAwashReceiverName},
 			ebirrReceiverVariants()...,
 		)
 	}
@@ -575,6 +616,20 @@ func isAllowedReceiverFor(method, name string) bool {
 		if containsAllWords(have, want) {
 			return true
 		}
+	}
+	return false
+}
+
+// isAllowedTelebirrDepositReceiver accepts normal Telebirr-to-wallet (telebirr name),
+// Telebirr-to-CBE where the slip shows the CBE beneficiary name, or the configured CBE agent account number.
+func isAllowedTelebirrDepositReceiver(creditedName, creditedAcct string) bool {
+	if isAllowedReceiverFor("telebirr", creditedName) || isAllowedReceiverFor("cbe", creditedName) {
+		return true
+	}
+	want := digitsOnly(NigedBankAgentAcct)
+	got := digitsOnly(creditedAcct)
+	if want != "" && got != "" && want == got {
+		return true
 	}
 	return false
 }
@@ -1996,6 +2051,16 @@ func cleanVal(s string) string {
 	return strings.Join(fields, " ")
 }
 
+func digitsOnly(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func normalizeBirrAmount(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimSuffix(s, "ETB")
@@ -2031,13 +2096,70 @@ var (
 	reLink      = regexp.MustCompile(`(?i)\bhttps?://\S+`)
 	reDate      = regexp.MustCompile(`(?i)\bon\s+([0-9]{2}[-/][0-9]{2}[-/][0-9]{4}\s+[0-9]{2}:[0-9]{2}:[0-9]{2})`)
 	reAmtCell   = regexp.MustCompile(`(?i)\b([0-9][0-9,]*\.?\d*)\s*(?:birr|etb)\b`)
+	// Telebirr SMS (EN): "account number 1000517969005"
+	reTelebirrSMSBankAcct = regexp.MustCompile(`(?i)(?:account\s+number|account\s+no\.?)\s*(\d{10,16})`)
 )
 
 /* ======= receipt helpers ======= */
 
+// extractReceiptLinkFromSMS returns the first URL in the message that belongs to a known
+// receipt host (CBE, Telebirr, EBirr, BOA, Awash). Skips unrelated links (e.g. forms.gle)
+// that often appear before the real slip URL in bank SMS.
+func extractReceiptLinkFromSMS(txt string) string {
+	for _, raw := range reLink.FindAllString(txt, -1) {
+		link := strings.TrimRight(raw, ".,;)")
+		u, err := url.Parse(link)
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(u.Hostname(), BOAAllowedHost) && strings.TrimSpace(u.Query().Get("trx")) == "" {
+			continue
+		}
+		if strings.EqualFold(u.Hostname(), AwashAllowedHost) && strings.Trim(u.Path, "/") == "" {
+			continue
+		}
+		if methodFromReceiptURL(link) != "" {
+			return link
+		}
+	}
+	return ""
+}
+
 func parseTelebirrSMS(s string) (*TelebirrSMS, bool) {
 	txt := strings.TrimSpace(s)
 	low := strings.ToLower(txt)
+
+	// Bank of Abyssinia deposit SMS: Amharic text + slip link (?trx=). Accept from link alone.
+	for _, raw := range reLink.FindAllString(txt, -1) {
+		link := strings.TrimRight(raw, ".,;)")
+		if u, err := url.Parse(link); err == nil && strings.EqualFold(u.Hostname(), BOAAllowedHost) && strings.TrimSpace(u.Query().Get("trx")) != "" {
+			r := &TelebirrSMS{Link: link}
+			if m2 := reAmountSMS.FindStringSubmatch(txt); len(m2) > 1 {
+				r.Amount = strings.ReplaceAll(m2[1], ",", "")
+			}
+			if m2 := reTxn.FindStringSubmatch(txt); len(m2) > 1 {
+				r.Invoice = m2[1]
+			}
+			return r, true
+		}
+	}
+
+	// Awash Bank: receipt link on awashpay host (path token, optional port :8225).
+	for _, raw := range reLink.FindAllString(txt, -1) {
+		link := strings.TrimRight(raw, ".,;)")
+		if u, err := url.Parse(link); err == nil && strings.EqualFold(u.Hostname(), AwashAllowedHost) {
+			if p := strings.Trim(u.Path, "/"); p != "" {
+				r := &TelebirrSMS{Link: link}
+				if m2 := reAmountSMS.FindStringSubmatch(txt); len(m2) > 1 {
+					r.Amount = strings.ReplaceAll(m2[1], ",", "")
+				}
+				if m2 := reTxn.FindStringSubmatch(txt); len(m2) > 1 {
+					r.Invoice = m2[1]
+				}
+				return r, true
+			}
+		}
+	}
 
 	hasLink := reLink.MatchString(txt)
 	hasAmount := reAmountSMS.MatchString(txt)
@@ -2065,8 +2187,8 @@ func parseTelebirrSMS(s string) (*TelebirrSMS, bool) {
 	if m := reReceiver.FindStringSubmatch(txt); len(m) > 1 {
 		r.Payee = strings.TrimSpace(m[1])
 	}
-	if m := reLink.FindStringSubmatch(txt); len(m) > 0 {
-		r.Link = strings.TrimRight(m[0], ".,;)")
+	if link := extractReceiptLinkFromSMS(txt); link != "" {
+		r.Link = link
 	}
 	if m := reDate.FindStringSubmatch(txt); len(m) > 1 {
 		r.Date = m[1]
@@ -2090,6 +2212,136 @@ func isAllowedCBEURL(raw string) bool {
 		return false
 	}
 	return isAllowedCBEHost(u.Hostname())
+}
+
+func isAllowedBOAURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(u.Hostname()), BOAAllowedHost)
+}
+
+// parseBOAReceipt loads slip details from the public API used by the BOA slip SPA.
+func parseBOAReceipt(rawURL string) (*BOAReceipt, error) {
+	if !isAllowedBOAURL(rawURL) {
+		return nil, fmt.Errorf("receipt host not allowed")
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	trx := strings.TrimSpace(u.Query().Get("trx"))
+	if trx == "" {
+		return nil, fmt.Errorf("missing trx in BOA slip URL")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), HTTPTimeout)
+	defer cancel()
+	apiURL := "https://" + BOAAllowedHost + "/api/onlineSlip/getDetails/?id=" + url.QueryEscape(trx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("BOA getDetails: %s: %s", resp.Status, string(b))
+	}
+	var wrap struct {
+		Body []map[string]string `json:"body"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wrap); err != nil {
+		return nil, err
+	}
+	if len(wrap.Body) == 0 {
+		return nil, fmt.Errorf("empty BOA slip body")
+	}
+	row := wrap.Body[0]
+	r := &BOAReceipt{Source: "boa", Link: rawURL}
+	r.TxID = strings.ToUpper(strings.TrimSpace(row["Transaction Reference"]))
+	if r.TxID == "" {
+		r.TxID = strings.ToUpper(trx)
+	} else if len(trx) > len(r.TxID) && strings.HasPrefix(strings.ToUpper(trx), r.TxID) {
+		r.TxID = strings.ToUpper(trx)
+	}
+	r.PaymentDate = strings.TrimSpace(row["Transaction Date"])
+	r.TransferredAmount = strings.TrimSpace(row["Transferred Amount"])
+	r.PayerName = firstNonEmpty(row["Source Account Name"], row["Payer's Name"])
+	r.ReceiverName = strings.TrimSpace(row["Receiver's Name"])
+	if r.TransferredAmount != "" {
+		if m := reAmtCell.FindStringSubmatch(strings.ToLower(r.TransferredAmount)); len(m) >= 2 {
+			r.TransferredAmount = strings.ReplaceAll(m[1], ",", "")
+		} else {
+			r.TransferredAmount = normalizeBirrAmount(r.TransferredAmount)
+		}
+	}
+	if r.TxID == "" || r.TransferredAmount == "" || r.ReceiverName == "" {
+		return nil, fmt.Errorf("missing required fields in BOA receipt")
+	}
+	return r, nil
+}
+
+func isAllowedAwashURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(u.Hostname()), AwashAllowedHost)
+}
+
+// awashInfoRow returns the value cell for a label row in Awash receipt info tables.
+func awashInfoRow(doc *goquery.Document, label string) string {
+	want := strings.ToLower(strings.TrimSpace(label))
+	var out string
+	doc.Find("table.info-table tr").EachWithBreak(func(_ int, tr *goquery.Selection) bool {
+		tds := tr.Find("td")
+		if tds.Length() < 3 {
+			return true
+		}
+		lab := strings.ToLower(strings.TrimSpace(cleanVal(tds.Eq(0).Text())))
+		if lab != want && !strings.HasPrefix(lab, want+" ") {
+			return true
+		}
+		out = cleanVal(tds.Eq(2).Text())
+		return false
+	})
+	return out
+}
+
+// parseAwashReceipt loads the public HTML receipt page.
+func parseAwashReceipt(rawURL string) (*AwashReceipt, error) {
+	if !isAllowedAwashURL(rawURL) {
+		return nil, fmt.Errorf("receipt host not allowed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), HTTPTimeout)
+	defer cancel()
+	doc, err := httpGetHTML(ctx, rawURL)
+	if err != nil {
+		return nil, err
+	}
+	r := &AwashReceipt{Source: "awash", Link: rawURL}
+	r.TxID = strings.TrimSpace(awashInfoRow(doc, "Transaction ID"))
+	r.PaymentDate = strings.TrimSpace(awashInfoRow(doc, "Transaction Date"))
+	amt := strings.TrimSpace(awashInfoRow(doc, "Amount"))
+	if amt != "" {
+		if m := reAmtCell.FindStringSubmatch(strings.ToLower(amt)); len(m) >= 2 {
+			r.TransferredAmount = strings.ReplaceAll(m[1], ",", "")
+		} else {
+			r.TransferredAmount = normalizeBirrAmount(amt)
+		}
+	}
+	r.PayerName = strings.TrimSpace(awashInfoRow(doc, "Sender Name"))
+	r.ReceiverName = strings.TrimSpace(awashInfoRow(doc, "Receiver Name"))
+	if r.TxID == "" || r.TransferredAmount == "" || r.ReceiverName == "" {
+		return nil, fmt.Errorf("missing required fields in Awash receipt")
+	}
+	return r, nil
 }
 
 func httpGetHTML(ctx context.Context, rawURL string) (*goquery.Document, error) {
@@ -2619,20 +2871,20 @@ func cbeMobileReceiptID(rawURL string) string {
 }
 
 type cbeMobileTxnResp struct {
-	ID                        string   `json:"id"`
-	DebitAmount               string   `json:"debitAmount"`
-	AmountCredited            string   `json:"amountCredited"`
-	AmountCreditedWithCurrency string  `json:"amountCreditedWithCurrency"`
-	AmountDebited             string   `json:"amountDebited"`
-	AmountDebitedWithCurrency string   `json:"amountDebitedWithCurrency"`
-	TotalChargeAmount         string   `json:"totalChargeAmount"`
-	TotalTaxAmount            string   `json:"totalTaxAmount"`
-	CreditAccountNo           string   `json:"creditAccountNo"`
-	DebitAccountNo            string   `json:"debitAccountNo"`
-	CreditAccountHolder       string   `json:"creditAccountHolder"`
-	DebitAccountHolder        string   `json:"debitAccountHolder"`
-	DateTimes                 []string `json:"dateTimes"`
-	PaymentDetails            []string `json:"paymentDetails"`
+	ID                         string   `json:"id"`
+	DebitAmount                string   `json:"debitAmount"`
+	AmountCredited             string   `json:"amountCredited"`
+	AmountCreditedWithCurrency string   `json:"amountCreditedWithCurrency"`
+	AmountDebited              string   `json:"amountDebited"`
+	AmountDebitedWithCurrency  string   `json:"amountDebitedWithCurrency"`
+	TotalChargeAmount          string   `json:"totalChargeAmount"`
+	TotalTaxAmount             string   `json:"totalTaxAmount"`
+	CreditAccountNo            string   `json:"creditAccountNo"`
+	DebitAccountNo             string   `json:"debitAccountNo"`
+	CreditAccountHolder        string   `json:"creditAccountHolder"`
+	DebitAccountHolder         string   `json:"debitAccountHolder"`
+	DateTimes                  []string `json:"dateTimes"`
+	PaymentDetails             []string `json:"paymentDetails"`
 }
 
 func parseCBEMobileReceipt(rawURL string) (*CBEReceipt, error) {
@@ -3251,9 +3503,13 @@ func sendDepositMethods(bot *tgbotapi.BotAPI, chatID int64) {
 			tgbotapi.NewInlineKeyboardButtonData("Telebirr", "dep:telebirr_agent"),
 			tgbotapi.NewInlineKeyboardButtonData("CBE", "dep:niged_bank_agent"),
 		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("EBIRR", "dep:e_birr_agent"),
-		),
+		// tgbotapi.NewInlineKeyboardRow(
+		// 	tgbotapi.NewInlineKeyboardButtonData("EBIRR", "dep:e_birr_agent"),
+		// 	tgbotapi.NewInlineKeyboardButtonData("BOA", "dep:boa_agent"),
+		// ),
+		// tgbotapi.NewInlineKeyboardRow(
+		// 	tgbotapi.NewInlineKeyboardButtonData("Awash", "dep:awash_agent"),
+		// ),
 	}
 	m := tgbotapi.NewMessage(chatID, "Please select the bank option you wish to use for the top-up.")
 	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
@@ -3301,7 +3557,7 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 
 	botToken := mustEnv("BOT_TOKEN")
-	miniAppURL := getenvDefault("MINI_APP_URL", "https://lucyb.tabia.site")
+	miniAppURL := getenvDefault("MINI_APP_URL", "https://henb.teshie.dev")
 
 	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
@@ -3414,6 +3670,26 @@ func main() {
 					AllowedEBirrReceiverName,
 					EBIRRAgentAcct,
 				)
+
+			case cq.Data == "dep:boa_agent":
+				_ = answerCallback(bot, cq.ID, "Bank of Abyssinia to Bank of Abyssinia only")
+				showAccountCardStandard(
+					bot, chatID,
+					"boa",
+					"BOA",
+					AllowedBOAReceiverName,
+					AbyssiniaAgentAcct,
+				)
+
+			case cq.Data == "dep:awash_agent":
+				_ = answerCallback(bot, cq.ID, "Awash Bank to Awash Bank only")
+				showAccountCardStandard(
+					bot, chatID,
+					"awash",
+					"Awash",
+					AllowedAwashReceiverName,
+					AwashAgentAcct,
+				)
 			case strings.HasPrefix(cq.Data, "wd:method:"):
 				_ = answerCallback(bot, cq.ID, "Method selected")
 				ws := sess(chatID)
@@ -3422,7 +3698,7 @@ func main() {
 				}
 				method := strings.TrimPrefix(cq.Data, "wd:method:")
 				method = strings.ToLower(method)
-				if method != "telebirr" && method != "cbe" && method != "ebirr" {
+				if method != "telebirr" && method != "cbe" && method != "ebirr" && method != "boa" && method != "awash" {
 					method = "telebirr"
 				}
 				ws.WithdrawMethod = method
@@ -4127,10 +4403,10 @@ func main() {
 			bot.Send(tgbotapi.NewMessage(chatID, "Pick a stake → choose a board → select numbers."))
 			continue
 		case "☎️ Contact Us":
-			bot.Send(tgbotapi.NewMessage(chatID, "Support: @Suporti9"))
+			bot.Send(tgbotapi.NewMessage(chatID, "Support: @09 20 03 14 93"))
 			continue
 		case "👥 Join Us":
-			bot.Send(tgbotapi.NewMessage(chatID, "Join our channel: at LucyBingoOfficial"))
+			bot.Send(tgbotapi.NewMessage(chatID, "Join our channel: t.me/lucybingo"))
 			continue
 		}
 
@@ -4607,8 +4883,10 @@ func main() {
 
 			// --- parse by method (do the real parsing here) ---
 			var (
-				r      *TelebirrReceipt // telebirr/ebirr
-				cbeRec *CBEReceipt      // cbe
+				r        *TelebirrReceipt // telebirr/ebirr
+				cbeRec   *CBEReceipt      // cbe
+				boaRec   *BOAReceipt      // boa
+				awashRec *AwashReceipt    // awash
 			)
 
 			switch chosenMethod {
@@ -4650,11 +4928,36 @@ func main() {
 					bot.Send(tgbotapi.NewMessage(chatID, "❌ Could not read the CBE receipt. Please open the link and resend."))
 					continue
 				}
+			case "boa":
+				if sms.Link == "" || !isAllowedBOAURL(sms.Link) {
+					bot.Send(tgbotapi.NewMessage(chatID, "Please send the official Bank of Abyssinia receipt link (cs.bankofabyssinia.com slip)."))
+					continue
+				}
+				if rr, err := parseBOAReceipt(sms.Link); err == nil {
+					boaRec = rr
+				} else {
+					log.Printf("boa parse err: %v", err)
+					bot.Send(tgbotapi.NewMessage(chatID, "❌ Could not read the BOA receipt. Please open the link and resend."))
+					continue
+				}
+			case "awash":
+				if sms.Link == "" || !isAllowedAwashURL(sms.Link) {
+					bot.Send(tgbotapi.NewMessage(chatID, "Please send the official Awash Bank receipt link (awashpay.awashbank.com)."))
+					continue
+				}
+				if rr, err := parseAwashReceipt(sms.Link); err == nil {
+					awashRec = rr
+				} else {
+					log.Printf("awash parse err: %v", err)
+					bot.Send(tgbotapi.NewMessage(chatID, "❌ Could not read the Awash receipt. Please open the link and resend."))
+					continue
+				}
 			}
 
 			// --- collect fields (NO SMS FALLBACKS FOR CBE) ---
 			var (
 				invoice, dateStr, amount, sender, receiver string
+				telebirrCreditedAcct                       string
 			)
 
 			if r != nil { // telebirr/ebirr
@@ -4665,23 +4968,23 @@ func main() {
 				// 	isValid, err := isWithinLastDays(dateStr, 5)
 				// 	if err != nil {
 				// 		log.Printf("Date parsing error: %v", err)
-				// 		bot.Send(tgbotapi.NewMessage(chatID, 
+				// 		bot.Send(tgbotapi.NewMessage(chatID,
 				// 			"❌ Could not verify the payment date. Please make sure the receipt includes a valid date."))
 				// 		continue
 				// 	}
-					
+
 				// 	if !isValid {
 				// 		msg := fmt.Sprintf(
 				// 			"❌ <b>Invalid Payment Date</b>\n\n"+
-				// 			"The payment date <b>%s</b> is older than 5 days.\n\n"+
-				// 			"For security reasons, we only accept deposits made within the last 5 days.\n"+
-				// 			"Please make a new payment and send the receipt within 5 days.",
+				// 				"The payment date <b>%s</b> is older than 5 days.\n\n"+
+				// 				"For security reasons, we only accept deposits made within the last 5 days.\n"+
+				// 				"Please make a new payment and send the receipt within 5 days.",
 				// 			escapeHTML(dateStr),
 				// 		)
 				// 		m := tgbotapi.NewMessage(chatID, msg)
 				// 		m.ParseMode = "HTML"
 				// 		bot.Send(m)
-						
+
 				// 		if NotifyChatID != 0 {
 				// 			adminMsg := fmt.Sprintf("⚠️ Rejected old payment (user: %d)\nDate: %s", userID, dateStr)
 				// 			bot.Send(tgbotapi.NewMessage(NotifyChatID, adminMsg))
@@ -4692,31 +4995,32 @@ func main() {
 				amount = r.SettledAmount
 				sender = firstNonEmpty(r.PayerName, "")
 				receiver = firstNonEmpty(r.CreditedPartyName, "")
+				telebirrCreditedAcct = strings.TrimSpace(r.CreditedPartyAccount)
 			} else if cbeRec != nil { // cbe
 				invoice = strings.TrimSpace(cbeRec.TxID)
 				dateStr = normalizeReceiptDate(cbeRec.PaymentDate)
-				// // After extracting dateStr, add this validation
+				// After extracting dateStr, add this validation
 				// if dateStr != "" {
 				// 	isValid, err := isWithinLastDays(dateStr, 5)
 				// 	if err != nil {
 				// 		log.Printf("Date parsing error: %v", err)
-				// 		bot.Send(tgbotapi.NewMessage(chatID, 
+				// 		bot.Send(tgbotapi.NewMessage(chatID,
 				// 			"❌ Could not verify the payment date. Please make sure the receipt includes a valid date."))
 				// 		continue
 				// 	}
-					
+
 				// 	if !isValid {
 				// 		msg := fmt.Sprintf(
 				// 			"❌ <b>Invalid Payment Date</b>\n\n"+
-				// 			"The payment date <b>%s</b> is older than 5 days.\n\n"+
-				// 			"For security reasons, we only accept deposits made within the last 5 days.\n"+
-				// 			"Please make a new payment and send the receipt within 5 days.",
+				// 				"The payment date <b>%s</b> is older than 5 days.\n\n"+
+				// 				"For security reasons, we only accept deposits made within the last 5 days.\n"+
+				// 				"Please make a new payment and send the receipt within 5 days.",
 				// 			escapeHTML(dateStr),
 				// 		)
 				// 		m := tgbotapi.NewMessage(chatID, msg)
 				// 		m.ParseMode = "HTML"
 				// 		bot.Send(m)
-						
+
 				// 		if NotifyChatID != 0 {
 				// 			adminMsg := fmt.Sprintf("⚠️ Rejected old payment (user: %d)\nDate: %s", userID, dateStr)
 				// 			bot.Send(tgbotapi.NewMessage(NotifyChatID, adminMsg))
@@ -4727,6 +5031,72 @@ func main() {
 				amount = cbeRec.TransferredAmount
 				sender = firstNonEmpty(cbeRec.PayerName, "")
 				receiver = firstNonEmpty(cbeRec.ReceiverName, "")
+			} else if boaRec != nil { // boa
+				invoice = strings.TrimSpace(boaRec.TxID)
+				dateStr = normalizeReceiptDate(boaRec.PaymentDate)
+				// if dateStr != "" {
+				// 	isValid, err := isWithinLastDays(dateStr, 5)
+				// 	if err != nil {
+				// 		log.Printf("Date parsing error: %v", err)
+				// 		bot.Send(tgbotapi.NewMessage(chatID, "❌ Could not verify the payment date. Please make sure the receipt includes a valid date."))
+				// 		continue
+				// 	}
+
+				// 	if !isValid {
+				// 		msg := fmt.Sprintf(
+				// 			"❌ <b>Invalid Payment Date</b>\n\n"+
+				// 				"The payment date <b>%s</b> is older than 5 days.\n\n"+
+				// 				"For security reasons, we only accept deposits made within the last 5 days.\n"+
+				// 				"Please make a new payment and send the receipt within 5 days.",
+				// 			escapeHTML(dateStr),
+				// 		)
+				// 		m := tgbotapi.NewMessage(chatID, msg)
+				// 		m.ParseMode = "HTML"
+				// 		bot.Send(m)
+
+				// 		if NotifyChatID != 0 {
+				// 			adminMsg := fmt.Sprintf("⚠️ Rejected old payment (user: %d)\nDate: %s", userID, dateStr)
+				// 			bot.Send(tgbotapi.NewMessage(NotifyChatID, adminMsg))
+				// 		}
+				// 		continue
+				// 	}
+				// }
+				amount = boaRec.TransferredAmount
+				sender = firstNonEmpty(boaRec.PayerName, "")
+				receiver = firstNonEmpty(boaRec.ReceiverName, "")
+			} else if awashRec != nil { // awash
+				invoice = strings.TrimSpace(awashRec.TxID)
+				dateStr = normalizeReceiptDate(awashRec.PaymentDate)
+				// if dateStr != "" {
+				// 	isValid, err := isWithinLastDays(dateStr, 5)
+				// 	if err != nil {
+				// 		log.Printf("Date parsing error: %v", err)
+				// 		bot.Send(tgbotapi.NewMessage(chatID, "❌ Could not verify the payment date. Please make sure the receipt includes a valid date."))
+				// 		continue
+				// 	}
+
+				// 	if !isValid {
+				// 		msg := fmt.Sprintf(
+				// 			"❌ <b>Invalid Payment Date</b>\n\n"+
+				// 				"The payment date <b>%s</b> is older than 5 days.\n\n"+
+				// 				"For security reasons, we only accept deposits made within the last 5 days.\n"+
+				// 				"Please make a new payment and send the receipt within 5 days.",
+				// 			escapeHTML(dateStr),
+				// 		)
+				// 		m := tgbotapi.NewMessage(chatID, msg)
+				// 		m.ParseMode = "HTML"
+				// 		bot.Send(m)
+
+				// 		if NotifyChatID != 0 {
+				// 			adminMsg := fmt.Sprintf("⚠️ Rejected old payment (user: %d)\nDate: %s", userID, dateStr)
+				// 			bot.Send(tgbotapi.NewMessage(NotifyChatID, adminMsg))
+				// 		}
+				// 		continue
+				// 	}
+				// }
+				amount = awashRec.TransferredAmount
+				sender = firstNonEmpty(awashRec.PayerName, "")
+				receiver = firstNonEmpty(awashRec.ReceiverName, "")
 			} else {
 				// Shouldn't happen, but guard anyway
 				bot.Send(tgbotapi.NewMessage(chatID, "❌ Unable to read the receipt."))
@@ -4745,14 +5115,29 @@ func main() {
 			}
 
 			// --- validate receiver strictly from parsed page ---
-			if !isAllowedReceiverFor(chosenMethod, receiver) {
+			recvOK := isAllowedReceiverFor(chosenMethod, receiver)
+			if chosenMethod == "telebirr" {
+				if digitsOnly(telebirrCreditedAcct) == "" && strings.TrimSpace(text) != "" {
+					if m := reTelebirrSMSBankAcct.FindStringSubmatch(text); len(m) > 1 {
+						telebirrCreditedAcct = m[1]
+					}
+				}
+				recvOK = isAllowedTelebirrDepositReceiver(receiver, telebirrCreditedAcct)
+			}
+			if !recvOK {
 				expectName := map[string]string{
 					"telebirr": AllowedTelebirrReceiverName,
 					"ebirr":    AllowedEBirrReceiverName,
 					"cbe":      AllowedCBEBirrReceiverName,
+					"boa":      AllowedBOAReceiverName,
+					"awash":    AllowedAwashReceiverName,
 				}[chosenMethod]
+				if chosenMethod == "telebirr" {
+					expectName = fmt.Sprintf("%s (wallet), %s (Telebirr→CBE), or CBE account %s",
+						AllowedTelebirrReceiverName, AllowedCBEBirrReceiverName, NigedBankAgentAcct)
+				}
 				msg := fmt.Sprintf(
-					"❌ <b>Invalid receipt</b>\n\nThe credited party on your %s receipt is <b>%s</b>.\nIt must include the words: <b>%s</b>.",
+					"❌ <b>Invalid receipt</b>\n\nThe credited party on your %s receipt is <b>%s</b>.\nIt must match: <b>%s</b>.",
 					strings.ToUpper(chosenMethod),
 					escapeHTML(strings.TrimSpace(receiver)),
 					escapeHTML(expectName),
@@ -4761,8 +5146,8 @@ func main() {
 				m.ParseMode = "HTML"
 				bot.Send(m)
 				if NotifyChatID != 0 {
-					admin := fmt.Sprintf("🚫 Invalid receiver (%s)\nGot: %q  Expected≈: %q",
-						strings.ToUpper(chosenMethod), strings.TrimSpace(receiver), expectName)
+					admin := fmt.Sprintf("🚫 Invalid receiver (%s)\nGot name: %q acct: %q Expected\u2248: %q",
+						strings.ToUpper(chosenMethod), strings.TrimSpace(receiver), telebirrCreditedAcct, expectName)
 					bot.Send(tgbotapi.NewMessage(NotifyChatID, admin))
 				}
 				continue
@@ -4772,15 +5157,28 @@ func main() {
 			txid := strings.ToUpper(invoice)
 			if txid == "" && sms.Link != "" {
 				if u, err := url.Parse(sms.Link); err == nil {
-					if chosenMethod != "cbe" {
+					switch chosenMethod {
+					case "cbe":
+						if id := strings.ToUpper(u.Query().Get("id")); id != "" {
+							txid = id
+						}
+					case "boa":
+						if id := strings.ToUpper(strings.TrimSpace(u.Query().Get("trx"))); id != "" {
+							txid = id
+						}
+					case "awash":
+						// Prefer numeric Transaction ID from HTML; optional path token fallback
+						parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+						if len(parts) > 0 {
+							tok := strings.TrimSpace(parts[len(parts)-1])
+							if tok != "" {
+								txid = strings.ToUpper(tok)
+							}
+						}
+					default:
 						parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 						if len(parts) > 0 {
 							txid = strings.ToUpper(strings.TrimSpace(parts[len(parts)-1]))
-						}
-					} else {
-						// for CBE we already extracted TxID from query (?id=FT...)
-						if id := strings.ToUpper(u.Query().Get("id")); id != "" {
-							txid = id
 						}
 					}
 				}
@@ -4834,7 +5232,7 @@ func main() {
 			}
 
 			// --- build & submit txn ---
-			friendly := map[string]string{"telebirr": "Telebirr", "ebirr": "Ebirr", "cbe": "CBE"}[chosenMethod]
+			friendly := map[string]string{"telebirr": "Telebirr", "ebirr": "Ebirr", "cbe": "CBE", "boa": "BOA", "awash": "Awash"}[chosenMethod]
 			txnReq := createTxnReq{
 				Reference:    ref,
 				TelegramID:   userID,
@@ -4969,6 +5367,14 @@ func main() {
 					fmt.Fprintf(admin, "Payer/Receiver: %s → %s\n",
 						escapeHTML(firstNonEmpty(cbeRec.PayerName, "(?)")),
 						escapeHTML(firstNonEmpty(cbeRec.ReceiverName, "(?)")))
+				} else if chosenMethod == "boa" && boaRec != nil && (boaRec.PayerName != "" || boaRec.ReceiverName != "") {
+					fmt.Fprintf(admin, "Payer/Receiver: %s → %s\n",
+						escapeHTML(firstNonEmpty(boaRec.PayerName, "(?)")),
+						escapeHTML(firstNonEmpty(boaRec.ReceiverName, "(?)")))
+				} else if chosenMethod == "awash" && awashRec != nil && (awashRec.PayerName != "" || awashRec.ReceiverName != "") {
+					fmt.Fprintf(admin, "Payer/Receiver: %s → %s\n",
+						escapeHTML(firstNonEmpty(awashRec.PayerName, "(?)")),
+						escapeHTML(firstNonEmpty(awashRec.ReceiverName, "(?)")))
 				} else if r != nil && (r.PayerName != "" || r.CreditedPartyName != "") {
 					fmt.Fprintf(admin, "Payer/Receiver: %s → %s\n",
 						escapeHTML(firstNonEmpty(r.PayerName, "(?)")),
@@ -5474,6 +5880,15 @@ func parseReceiptPage(rawURL string) (*TelebirrReceipt, error) {
 		r.CreditedPartyName = extractValueByLabel(doc, "የገንዘብ ተቀባይ ስም", "Credited Party name")
 	}
 
+	r.CreditedPartyAccount = extractValueByLabel(doc,
+		"Credited party account no",
+		"Credited party account",
+		"Credited Party Account",
+	)
+	if r.CreditedPartyAccount == "" {
+		r.CreditedPartyAccount = valueAfterLabelRow(doc, "credited party account", "Credited party account")
+	}
+
 	doc.Find("table").Each(func(i int, table *goquery.Selection) {
 		tableText := strings.ToLower(table.Text())
 		if strings.Contains(tableText, "invoice") || strings.Contains(tableText, "የክፍያ") ||
@@ -5650,8 +6065,14 @@ func sendPaymentDetails(bot *tgbotapi.BotAPI, chatID int64, amount int, referenc
 func sendMethodMenu(bot *tgbotapi.BotAPI, chatID int64) {
 	row1 := tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Telebirr", "dep:telebirr_agent"))
 	row2 := tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("CBE", "dep:niged_bank_agent"))
-	row3 := tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("EBIRR", "dep:e_birr_agent"))
-	inline := tgbotapi.NewInlineKeyboardMarkup(row1, row2, row3)
+	row3 := tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("EBIRR", "dep:e_birr_agent"),
+		tgbotapi.NewInlineKeyboardButtonData("BOA", "dep:boa_agent"),
+	)
+	row4 := tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Awash", "dep:awash_agent"),
+	)
+	inline := tgbotapi.NewInlineKeyboardMarkup(row1, row2, row3, row4)
 	m := tgbotapi.NewMessage(chatID, "እባክዎትን የመያዣ አማራጭ ይምረጡ።")
 	m.ReplyMarkup = inline
 	bot.Send(m)
@@ -5663,6 +6084,7 @@ func sendWithdrawMethodMenu(bot *tgbotapi.BotAPI, chatID int64) {
 		tgbotapi.NewInlineKeyboardButtonData("CBE", "wd:method:cbe"),
 		tgbotapi.NewInlineKeyboardButtonData("BOA", "wd:method:boa"),
 		tgbotapi.NewInlineKeyboardButtonData("EBIRR", "wd:method:ebirr"),
+		tgbotapi.NewInlineKeyboardButtonData("Awash", "wd:method:awash"),
 	)
 	m := tgbotapi.NewMessage(chatID, "Select payment method:")
 	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(row)

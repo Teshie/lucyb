@@ -1162,7 +1162,7 @@ func (r *roomLive) startRoundNowLocked() {
 	r.callSeq = shuffled1to75()
 	r.callIdx = 0
 	// 	// 🔥 ADD THIS
- 	r.CallLevel = callLevelForToday()
+ 	// r.CallLevel = callLevelForToday()
 	// 🔥 SET CallLevel based on room ID
 	// if r.RoomID == "50" {
 	// 	// Force level 1 for room 50 (or use callLevelForToday() if you want it to follow the schedule)
