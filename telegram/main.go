@@ -171,16 +171,16 @@ type depositSession struct {
 
 /* ===================== Config ===================== */
 var (
-	APIBase               = getenvDefault("API_BASE", "https://henb.teshie.dev")
+	APIBase               = getenvDefault("API_BASE", "https://lucyb.tabia.site")
 	AdminSupergroup int64 = -1002877017597
 
 	PayeeName  = "Henok"
 	PayeePhone = "0915418674"
 
-	TelebirrAgentAcct  = "0920031493"
-	NigedBankAgentAcct = "1000255224108"
-	EBIRRAgentAcct     = "0920031493"
-	AbyssiniaAgentAcct = "147857373"
+	TelebirrAgentAcct  = "0920xxx"
+	NigedBankAgentAcct = "1000255xxx"
+	EBIRRAgentAcct     = "09200xxx"
+	AbyssiniaAgentAcct = "147857xxx"
 	AwashAgentAcct     = getenvDefault("AWASH_AGENT_ACCT", "01320692405700")
 
 	SupportHandle1 = "@"
@@ -203,11 +203,11 @@ var (
 	NotifyChatID int64 = -5170665254
 
 	// Require credited party to be this exact person (tokenized match)
-	AllowedTelebirrReceiverName = getenvDefault("ALLOWED_RECEIVER_TELEBIRR", "yihanew nigus tamiru")
-	AllowedCBEBirrReceiverName  = getenvDefault("ALLOWED_RECEIVER_CBE", "YIHENEW  NIGUSSIE TAMIRU")
-	AllowedBOAReceiverName      = getenvDefault("ALLOWED_RECEIVER_BOA", "HENOK BELAY MANDEFRO")
-	AllowedAwashReceiverName    = getenvDefault("ALLOWED_RECEIVER_AWASH", "HENOK BELAY MANDEFRO")
-	AllowedEBirrReceiverName    = getenvDefault("ALLOWED_RECEIVER_EBIRR", "niguse derse Dameta")
+	AllowedTelebirrReceiverName = getenvDefault("ALLOWED_RECEIVER_TELEBIRR", "sisay")
+	AllowedCBEBirrReceiverName  = getenvDefault("ALLOWED_RECEIVER_CBE", "Sisay")
+	AllowedBOAReceiverName      = getenvDefault("ALLOWED_RECEIVER_BOA", "Sisay")
+	AllowedAwashReceiverName    = getenvDefault("ALLOWED_RECEIVER_AWASH", "Sisay")
+	AllowedEBirrReceiverName    = getenvDefault("ALLOWED_RECEIVER_EBIRR", "Sisay")
 	CBEMobileAPIBase            = getenvDefault("CBE_MOBILE_API_BASE", "https://mb.cbe.com.et")
 	CBEMobileAppID              = getenvDefault("CBE_MOBILE_APP_ID", "d1292e42-7400-49de-a2d3-9731caa4c819")
 	CBEMobileAppVersion         = getenvDefault("CBE_MOBILE_APP_VERSION", "0a01980b-9859-1369-8198-59f403820000")
@@ -1443,7 +1443,16 @@ type createTxnReq struct {
 var (
 	ErrDuplicateTxID = fmt.Errorf("duplicate_txid")
 	ErrDuplicateRef  = fmt.Errorf("duplicate_reference")
+	ErrUserNotInDB   = errors.New("user not registered in db")
 )
+
+// isGETNotFound reports whether err is a failed GET from httpGetJSON with HTTP 404.
+func isGETNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "=> 404")
+}
 
 type createTxnAPIResp struct {
 	OK     bool   `json:"ok"`
@@ -1455,7 +1464,9 @@ type createTxnAPIResp struct {
 func isUserAdmin(telegramID int64) bool {
 	dto, err := apiGetUserByTelegramID(telegramID)
 	if err != nil {
-		log.Printf("isUserAdmin: %v", err)
+		if !errors.Is(err, ErrUserNotInDB) {
+			log.Printf("isUserAdmin: %v", err)
+		}
 		return false
 	}
 	return dto.IsAdmin
@@ -1542,9 +1553,14 @@ func expectJSON(resp *http.Response) error {
 	return fmt.Errorf(`expected JSON but got %q (%s). Preview: %q`, ct, resp.Status, string(preview))
 }
 
+// apiGetUserByTelegramID loads the user from the API only (no Telegram UI). Missing row => ErrUserNotInDB.
+// Callers that require a verified phone should check dto.HasPhone and call askForPhoneIfMissing themselves.
 func apiGetUserByTelegramID(tid int64) (*userDTO, error) {
 	var out userDTO
 	if err := httpGetJSON(APIBase, fmt.Sprintf("/users/by-telegram/%d", tid), &out); err != nil {
+		if isGETNotFound(err) {
+			return nil, ErrUserNotInDB
+		}
 		return nil, err
 	}
 	return &out, nil
@@ -3557,7 +3573,7 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 
 	botToken := mustEnv("BOT_TOKEN")
-	miniAppURL := getenvDefault("MINI_APP_URL", "https://henb.teshie.dev")
+	miniAppURL := getenvDefault("MINI_APP_URL", "https://lucyb.tabia.site")
 
 	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
@@ -3719,7 +3735,7 @@ func main() {
 					now := time.Now().UTC().Format("2006-01-02 15:04:05")
 					play, _, _ := apiGetBalance(uid)
 					msg := fmt.Sprintf(
-						"💸 <b>Withdrawal Successful!</b>\n\n🟢 Amount: %s ብር\n📤 Sent to: %s (%s)\n📅 Date: %s\n💳 Remaining Balance: %s ብር\n\nThank you for using Lucy Bingo! 🎉",
+						"💸 <b>Withdrawal Successful!</b>\n\n🟢 Amount: %s ብር\n📤 Sent to: %s (%s)\n📅 Date: %s\n💳 Remaining Balance: %s ብር\n\nThank you for using Sisay Bingo! 🎉",
 						escapeHTML(amt), strings.ToUpper(method), escapeHTML(account), escapeHTML(now), escapeHTML(play),
 					)
 					m := tgbotapi.NewMessage(uid, msg)
@@ -3982,7 +3998,7 @@ func main() {
 					"━━━━━━━━━━━━━━━━━━━━\n"+
 					"💸 <b>+%s ብር</b> added to your <b>Play</b> wallet.\n\n"+
 					"🎯 Ready to win? Tap Play below and jump right in.\n\n"+
-					"<i>— Lucy Bingo</i>",
+					"<i>— Sisay Bingo</i>",
 				escapeHTML(amt),
 			)
 
@@ -4089,6 +4105,20 @@ func main() {
 				continue
 			}
 
+			// Sync Telegram profile after phone created/updated the row (new users only had phone before this).
+			if up.Message.From != nil {
+				uname := ""
+				if up.Message.From.UserName != "" {
+					uname = "@" + up.Message.From.UserName
+				}
+				fn := up.Message.From.FirstName
+				ln := up.Message.From.LastName
+				nm := strings.TrimSpace(fn + " " + ln)
+				if _, err := apiUpsertUser(tgID, uname, fn, ln, nm, "", s.StartParam); err != nil {
+					log.Printf("post share-phone profile sync failed: %v", err)
+				}
+			}
+
 			// success UI
 			reply := tgbotapi.NewMessage(up.Message.Chat.ID, "Thanks! You're verified. Let's play 🎉")
 			reply.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
@@ -4170,10 +4200,18 @@ func main() {
 		// 	continue
 
 		case "/withdraw", "🏧 Withdraw":
-			// Check if user has deposited before allowing withdraw
-			_, err := apiGetUserByTelegramID(int64(up.Message.From.ID))
+			wid := int64(up.Message.From.ID)
+			wdto, err := apiGetUserByTelegramID(wid)
 			if err != nil {
+				if errors.Is(err, ErrUserNotInDB) {
+					askForPhoneIfMissing(bot, chatID, false)
+					continue
+				}
 				bot.Send(tgbotapi.NewMessage(chatID, "Could not verify your account. Please try again."))
+				continue
+			}
+			if !wdto.HasPhone {
+				askForPhoneIfMissing(bot, chatID, false)
 				continue
 			}
 
@@ -4226,15 +4264,21 @@ func main() {
 
 			uid := int64(up.Message.From.ID)
 
-			// Fetch user to check phone
+			// Fetch user to check phone (nil bot: we set ResumeDepositAfterPhone before prompting)
 			dto, err := apiGetUserByTelegramID(uid)
 			if err != nil {
+				if errors.Is(err, ErrUserNotInDB) {
+					s := sess(chatID)
+					s.ResumeDepositAfterPhone = true
+					askForPhoneIfMissing(bot, chatID, false)
+					continue
+				}
 				log.Printf("deposit: get user failed: %v", err)
 				bot.Send(tgbotapi.NewMessage(chatID, "Please try again."))
 				continue
 			}
 
-			if dto == nil || !dto.HasPhone {
+			if !dto.HasPhone {
 				// Ask for phone and mark that we should resume the deposit flow after they share it
 				s := sess(chatID)
 				s.ResumeDepositAfterPhone = true
@@ -4257,18 +4301,17 @@ func main() {
 			}
 			userID = int64(up.Message.From.ID)
 
-			if _, err := apiUpsertUser(userID, username, firstName, lastName, fullName, "", s.StartParam); err != nil {
-				log.Printf("upsert user failed: %v", err)
-			}
-
-			dto, err := apiGetUserByTelegramID(userID)
+			playDTO, err := apiGetUserByTelegramID(userID)
 			if err != nil {
-				log.Printf("get user by telegram failed: %v", err)
-				bot.Send(tgbotapi.NewMessage(chatID, "Please try again."))
+				if errors.Is(err, ErrUserNotInDB) {
+					askForPhoneIfMissing(bot, chatID, false)
+					continue
+				}
+				log.Printf("play: get user failed: %v", err)
+				bot.Send(tgbotapi.NewMessage(chatID, "System error. Please try again."))
 				continue
 			}
-
-			if !dto.HasPhone {
+			if !playDTO.HasPhone {
 				askForPhoneIfMissing(bot, chatID, false)
 				continue
 			}
@@ -4368,7 +4411,7 @@ func main() {
 			// Use Telegram's share URL format
 			shareURL := fmt.Sprintf("https://t.me/share/url?url=%s&text=%s",
 				url.QueryEscape(deepLink),
-				url.QueryEscape("Join me on Lucy Bingo! 🎮"))
+				url.QueryEscape("Join me on Sisay Bingo! 🎮"))
 			// እንዴት እንደሚሰራ፡-
 			// 🔄እያንዳንዱ የጋበዝከው ሰው Deposit ባደረገ ቁጥር 10 ብር ያገኛሉ!
 
@@ -4403,10 +4446,10 @@ func main() {
 			bot.Send(tgbotapi.NewMessage(chatID, "Pick a stake → choose a board → select numbers."))
 			continue
 		case "☎️ Contact Us":
-			bot.Send(tgbotapi.NewMessage(chatID, "Support: @09 20 03 14 93"))
+			bot.Send(tgbotapi.NewMessage(chatID, "Support: @support1288"))
 			continue
 		case "👥 Join Us":
-			bot.Send(tgbotapi.NewMessage(chatID, "Join our channel: t.me/lucybingo"))
+			bot.Send(tgbotapi.NewMessage(chatID, "Join our channel: t.me/sisaybingo"))
 			continue
 		}
 
@@ -5315,7 +5358,7 @@ func main() {
 			fmt.Fprintf(receipt, "🆔 Transaction ID: %s\n", escapeHTML(txnID))
 			fmt.Fprintf(receipt, "📅 Date: %s\n", escapeHTML(ts))
 			fmt.Fprintf(receipt, "💳 New Balance: %s ብር\n\n", escapeHTML(playBal))
-			receipt.WriteString("Thank you for using Lucy Bingo! 🎉")
+			receipt.WriteString("Thank you for using Sisay Bingo! 🎉")
 
 			userMsg := tgbotapi.NewMessage(chatID, receipt.String())
 			userMsg.ParseMode = "HTML"
@@ -5555,7 +5598,7 @@ func main() {
 			fmt.Fprintf(receipt, "🆔 Transaction ID: %s\n", escapeHTML(txnID))
 			fmt.Fprintf(receipt, "📅 Date: %s\n", escapeHTML(ts))
 			fmt.Fprintf(receipt, "💳 New Balance: %s ብር\n\n", escapeHTML(playBal))
-			receipt.WriteString("Thank you for using Lucy Bingo! 🎉")
+			receipt.WriteString("Thank you for using Sisay Bingo! 🎉")
 
 			userMsg := tgbotapi.NewMessage(chatID, receipt.String())
 			userMsg.ParseMode = "HTML"
@@ -5785,7 +5828,7 @@ func main() {
 			fmt.Fprintf(receipt, "🆔 Transaction ID: %s\n", escapeHTML(txnID))
 			fmt.Fprintf(receipt, "📅 Date: %s\n", escapeHTML(ts))
 			fmt.Fprintf(receipt, "💳 New Balance: %s ብር\n\n", escapeHTML(playBal))
-			receipt.WriteString("Thank you for using Lucy Bingo! 🎉")
+			receipt.WriteString("Thank you for using Sisay Bingo! 🎉")
 
 			userMsg := tgbotapi.NewMessage(chatID, receipt.String())
 			userMsg.ParseMode = "HTML"
@@ -5946,7 +5989,7 @@ func parseReceiptPage(rawURL string) (*TelebirrReceipt, error) {
 /* ====================== UI ======================== */
 func handleStart(bot *tgbotapi.BotAPI, chatID int64) error {
 	// Example: whatever you currently do in your /start handler
-	msg := tgbotapi.NewMessage(chatID, "Welcome To Lucy Bingo! 🎉")
+	msg := tgbotapi.NewMessage(chatID, "Welcome To Sisay Bingo! 🎉")
 	_, err := bot.Send(msg)
 	return err
 }

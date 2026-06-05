@@ -1,4 +1,4 @@
-# Lucy Bingo Backend PRD
+# Sisay Bingo Backend PRD
 
 ## Original Problem Statement
 

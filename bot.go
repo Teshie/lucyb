@@ -321,8 +321,17 @@ func updateRoomScheduleOnState(roomID, status string) (base time.Time, newlySet 
 
 // ---------------- Entrypoint ----------------
 
+func botsEnabled() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("BOTS_ENABLED")))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
 func startBots(ctx context.Context) {
-	// Always enabled (per your request)
+	if !botsEnabled() {
+		log.Println("[bots] disabled (BOTS_ENABLED is off)")
+		return
+	}
+
 	cfg := newBotConfig()
 
 	// Load JSON plan (path fixed: ./conf.json)
