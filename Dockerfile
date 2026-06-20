@@ -23,7 +23,6 @@
     
     # ✅ include the boards file
     COPY --from=build /app/boards.json /app/boards.json
-    COPY --from=build /app/conf.json /app/conf.json
     
     ENV PORT=8001
     EXPOSE 8001

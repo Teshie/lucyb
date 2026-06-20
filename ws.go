@@ -340,6 +340,9 @@ func (r *roomLive) toDTO() RoomStateDTO {
 	selected := make([]int, 0, len(r.selected))
 	uniqOwners := make(map[int64]struct{})
 	for b, tid := range r.selected {
+		if isBotUser(tid) {
+			continue
+		}
 		selected = append(selected, b)
 		uniqOwners[tid] = struct{}{}
 	}
@@ -368,6 +371,9 @@ func (r *roomLive) toDTO() RoomStateDTO {
 
 	players := make([]PlayerInfo, 0, len(r.players))
 	for tid := range r.players {
+		if isBotUser(tid) {
+			continue
+		}
 		userBasic := userMap[tid]
 		if userBasic.FirstName == "" {
 			userBasic.FirstName = "Player"
@@ -1218,7 +1224,7 @@ func (r *roomLive) numberCausesHumanWin(n int) bool {
 
 	for boardNo, tid := range r.selected {
 		if isBotUser(tid) {
-			continue // we only care about humans
+			continue
 		}
 
 		b, ok := getBoard(boardNo)
@@ -1759,7 +1765,6 @@ func (r *roomLive) TryClaim(tid int64, _ int, reqID, winnerFirstName string) map
 func isBotUser(tid int64) bool {
 	var u User
 	if err := db.Select("is_bot").Where("telegram_id = ?", tid).First(&u).Error; err != nil {
-		// If we can't read the user, assume human so we don't silence legit users.
 		return false
 	}
 	return u.IsBot
@@ -2442,21 +2447,6 @@ func (rc *roomConn) closeSlow() {
 	_ = rc.conn.Close()
 }
 
-func isABotUser(telegramID int64) bool {
-    zeroCount := 0
-    id := telegramID
-    for id > 0 {
-        if id%10 == 0 {
-            zeroCount++
-            if zeroCount > 4 {
-                return true
-            }
-        }
-        id /= 10
-    }
-    return false
-}
-
 func wsRoomHandler(c *gin.Context) {
 	roomID := strings.TrimSpace(c.Param("room_id"))
 	if roomID == "" {
@@ -2471,6 +2461,10 @@ func wsRoomHandler(c *gin.Context) {
 	tid, err := parseTIDFromJWT(token)
 	if err != nil || tid == 0 {
 		c.String(http.StatusUnauthorized, "invalid token")
+		return
+	}
+	if isBotUser(tid) {
+		c.String(http.StatusForbidden, "bot accounts cannot join rooms")
 		return
 	}
 
@@ -2521,6 +2515,9 @@ func wsRoomHandler(c *gin.Context) {
 			var pls []RoomPlayer
 			if err := db.Where("room_id = ?", roomID).Find(&pls).Error; err == nil {
 				for _, p := range pls {
+					if isBotUser(p.TelegramID) {
+						continue
+					}
 					tb := rm.ownerBoards[p.TelegramID]
 
 					if p.BoardNumber != nil {
@@ -2541,6 +2538,9 @@ func wsRoomHandler(c *gin.Context) {
 			//  REBUILD DEBITED COUNTS
 			// ---------------------------
 			for tid2, tb := range rm.ownerBoards {
+				if isBotUser(tid2) {
+					continue
+				}
 				count := 0
 				if tb.B1 != nil {
 					count++

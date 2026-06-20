@@ -1082,9 +1082,6 @@ func initDB() {
 	sqlDB.SetMaxIdleConns(25)                 // Keep connections ready
 	sqlDB.SetConnMaxLifetime(5 * time.Minute) // Recycle connections periodically
 
-	// Start bots (non-blocking)
-	go startBots(context.Background())
-
 	if err := db.AutoMigrate(&User{}, &Transaction{}, &Room{}, &RoomPlayer{}, &Referral{}, &ReferralPayout{}); err != nil {
 		log.Fatal("AutoMigrate failed:", err)
 	}
@@ -1097,6 +1094,23 @@ func initDB() {
 	// Create additional indexes for slow queries
 	if err := createPerformanceIndexes(); err != nil {
 		log.Printf("Warning: createPerformanceIndexes failed: %v", err)
+	}
+
+	purgeBotRoomPlayers()
+}
+
+// purgeBotRoomPlayers removes stale bingo-bot seats left in room_players.
+func purgeBotRoomPlayers() {
+	res := db.Exec(`
+		DELETE FROM room_players
+		WHERE telegram_id IN (SELECT telegram_id FROM users WHERE is_bot = true)
+	`)
+	if res.Error != nil {
+		log.Printf("[cleanup] purge bot room_players failed: %v", res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("[cleanup] removed %d stale bot room_players rows", res.RowsAffected)
 	}
 }
 
@@ -2520,7 +2534,12 @@ func getRoomStateFromDB(c *gin.Context) {
 	}
 
 	selected := make([]int, 0, len(players))
+	humanCount := 0
 	for _, p := range players {
+		if isBotUser(p.TelegramID) {
+			continue
+		}
+		humanCount++
 		if p.BoardNumber != nil {
 			selected = append(selected, *p.BoardNumber)
 		}
@@ -2542,7 +2561,7 @@ func getRoomStateFromDB(c *gin.Context) {
 		"status":                 r.Status,
 		"start_time":             startStr, // RFC3339 or null
 		"possible_win":           possibleWinETB,
-		"number_of_players":      len(players),
+		"number_of_players":      humanCount,
 		"selected_board_numbers": selected,
 	})
 }
@@ -2630,8 +2649,11 @@ func bootRoomsIntoHub() error {
 				rl.StartTime = nil
 			}
 
-			// rehydrate players & selected boards
+			// rehydrate players & selected boards (humans only)
 			for _, p := range playerMap[r.RoomID] {
+				if isBotUser(p.TelegramID) {
+					continue
+				}
 				rl.players[p.TelegramID] = struct{}{}
 				if p.BoardNumber != nil {
 					rl.selected[*p.BoardNumber] = p.TelegramID
