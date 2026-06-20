@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	mathrand "math/rand"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -326,6 +327,11 @@ func botsEnabled() bool {
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
+// shouldBotJoin gates every connect/reconnect and periodic stay-alive checks.
+func shouldBotJoin(roomID string, slotIdx int) bool {
+	return botsEnabled() && botOnDuty(roomID, slotIdx, time.Now())
+}
+
 func startBots(ctx context.Context) {
 	if !botsEnabled() {
 		log.Println("[bots] disabled (BOTS_ENABLED is off)")
@@ -422,8 +428,7 @@ func runBotForever(ctx context.Context, cfg botConfig, roomID string, tid int64,
 	mathrand.Seed(time.Now().UnixNano() ^ int64(seedBytes[0])<<56)
 
 	for {
-		// Time-based duty check: if this slot is off-duty for this room now, sleep.
-		if !botOnDuty(roomID, slotIdx, time.Now()) {
+		if !shouldBotJoin(roomID, slotIdx) {
 			select {
 			case <-ctx.Done():
 				return
@@ -461,6 +466,10 @@ func makeJWT(tid int64) (string, error) {
 // ---------------- Bot session ----------------
 
 func botSession(ctx context.Context, cfg botConfig, roomID string, tid int64, slotIdx int) error {
+	if !shouldBotJoin(roomID, slotIdx) {
+		return nil
+	}
+
 	j, err := makeJWT(tid)
 	if err != nil {
 		return err
@@ -517,6 +526,19 @@ func botSession(ctx context.Context, cfg botConfig, roomID string, tid int64, sl
 		b, _ := json.Marshal(v)
 		_ = conn.SetWriteDeadline(time.Now().Add(4 * time.Second))
 		return conn.WriteMessage(websocket.TextMessage, b)
+	}
+	leaveIfIdle := func(status string) bool {
+		if shouldBotJoin(roomID, slotIdx) {
+			return false
+		}
+		// Mid-round: finish the game, leave once the room is idle again.
+		if status == "playing" || status == "claimed" {
+			return false
+		}
+		if isPrePlayStatus(status) || status == "" {
+			_ = send(map[string]any{"action": "leave"})
+		}
+		return true
 	}
 	resetSelect := func() {
 		if st.selectTimer != nil {
@@ -629,7 +651,7 @@ func botSession(ctx context.Context, cfg botConfig, roomID string, tid int64, sl
 		st.selectRetryTimer = time.AfterFunc(500*time.Millisecond, func() {
 			st.selectRetryTimer = nil
 			// Only retry if still pre-play, not committed, no board confirmed, and still on duty
-			if isPrePlayStatus(st.status) && !st.boardCommitted && st.myBoard == nil && botOnDuty(roomID, slotIdx, time.Now()) {
+			if isPrePlayStatus(st.status) && !st.boardCommitted && st.myBoard == nil && shouldBotJoin(roomID, slotIdx) {
 				st.selectRetryCount++
 				if st.selectRetryCount <= 10 { // Max 10 retries
 					pickAndSendBoard()
@@ -639,10 +661,25 @@ func botSession(ctx context.Context, cfg botConfig, roomID string, tid int64, sl
 		})
 	}
 
+	const dutyPoll = 30 * time.Second
+
 	// read loop
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		_ = conn.SetReadDeadline(time.Now().Add(dutyPoll))
 		_, data, err := conn.ReadMessage()
 		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				if leaveIfIdle(st.status) {
+					return nil
+				}
+				continue
+			}
 			return err
 		}
 		var msg map[string]any
@@ -703,10 +740,13 @@ func botSession(ctx context.Context, cfg botConfig, roomID string, tid int64, sl
 				resetSelect()
 			}
 
+			if leaveIfIdle(st.status) {
+				return nil
+			}
+
 			// selection staggering (respect on-duty schedule)
 			if isPrePlayStatus(st.status) && !st.boardCommitted && st.myBoard == nil {
-				// If this bot is not on duty at this time for this room, skip selection this round
-				if !botOnDuty(roomID, slotIdx, time.Now()) {
+				if !shouldBotJoin(roomID, slotIdx) {
 					updateRoomScheduleOnState(roomID, st.status)
 				} else {
 					base, _ := updateRoomScheduleOnState(roomID, st.status)
@@ -729,8 +769,7 @@ func botSession(ctx context.Context, cfg botConfig, roomID string, tid int64, sl
 						}
 						resetSelect()
 						st.selectTimer = time.AfterFunc(delay, func() {
-							// Only select if still pre-play, not committed, no board, and still on duty
-							if isPrePlayStatus(st.status) && !st.boardCommitted && st.myBoard == nil && botOnDuty(roomID, slotIdx, time.Now()) {
+							if isPrePlayStatus(st.status) && !st.boardCommitted && st.myBoard == nil && shouldBotJoin(roomID, slotIdx) {
 								pickAndSendBoard()
 								scheduleSelectRetry() // Auto-retry if selection fails
 							}

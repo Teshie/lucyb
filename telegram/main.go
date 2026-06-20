@@ -174,14 +174,14 @@ var (
 	APIBase               = getenvDefault("API_BASE", "https://lucyb.tabia.site")
 	AdminSupergroup int64 = -1002877017597
 
-	PayeeName  = "Henok"
-	PayeePhone = "0915418674"
+	PayeeName  = "Sisay"
+	PayeePhone = "0915000218"
 
-	TelebirrAgentAcct  = "0920xxx"
-	NigedBankAgentAcct = "1000255xxx"
-	EBIRRAgentAcct     = "09200xxx"
-	AbyssiniaAgentAcct = "147857xxx"
-	AwashAgentAcct     = getenvDefault("AWASH_AGENT_ACCT", "01320692405700")
+	TelebirrAgentAcct  = "0915000218"
+	NigedBankAgentAcct = "1000703994443"
+	EBIRRAgentAcct     = "0915000218"
+	AbyssiniaAgentAcct = "156990825"
+	AwashAgentAcct     = getenvDefault("AWASH_AGENT_ACCT", "011")
 
 	SupportHandle1 = "@"
 	SupportHandle2 = "@"
@@ -203,11 +203,11 @@ var (
 	NotifyChatID int64 = -5170665254
 
 	// Require credited party to be this exact person (tokenized match)
-	AllowedTelebirrReceiverName = getenvDefault("ALLOWED_RECEIVER_TELEBIRR", "sisay")
-	AllowedCBEBirrReceiverName  = getenvDefault("ALLOWED_RECEIVER_CBE", "Sisay")
-	AllowedBOAReceiverName      = getenvDefault("ALLOWED_RECEIVER_BOA", "Sisay")
+	AllowedTelebirrReceiverName = getenvDefault("ALLOWED_RECEIVER_TELEBIRR", "sisay mamo kebede")
+	AllowedCBEBirrReceiverName  = getenvDefault("ALLOWED_RECEIVER_CBE", "Sisay Mamo Kebede")
+	AllowedBOAReceiverName      = getenvDefault("ALLOWED_RECEIVER_BOA", "SISAY MAMO KEBEDE")
 	AllowedAwashReceiverName    = getenvDefault("ALLOWED_RECEIVER_AWASH", "Sisay")
-	AllowedEBirrReceiverName    = getenvDefault("ALLOWED_RECEIVER_EBIRR", "Sisay")
+	AllowedEBirrReceiverName    = getenvDefault("ALLOWED_RECEIVER_EBIRR", "sisay mamo kebede")
 	CBEMobileAPIBase            = getenvDefault("CBE_MOBILE_API_BASE", "https://mb.cbe.com.et")
 	CBEMobileAppID              = getenvDefault("CBE_MOBILE_APP_ID", "d1292e42-7400-49de-a2d3-9731caa4c819")
 	CBEMobileAppVersion         = getenvDefault("CBE_MOBILE_APP_VERSION", "0a01980b-9859-1369-8198-59f403820000")
@@ -475,13 +475,13 @@ func ebirrReceiverVariants() []string {
 
 	add(base)
 	// normalized full-name variants (both spellings)
-	add(strings.ReplaceAll(strings.ToLower(base), "mandefro", "mandafro"))
-	add(strings.ReplaceAll(strings.ToLower(base), "mandafro", "mandefro"))
-	add("henok belay mandefro")
-	add("henok belay mandafro")
+	add(strings.ReplaceAll(strings.ToLower(base), "kebede", "kebede"))
+	add(strings.ReplaceAll(strings.ToLower(base), "kebede", "kebede"))
+	add("sisay mamo kebede")
+	add("sisay mamo kebede")
 	// surname-only fallbacks (some slips show only the surname)
-	add("mandefro")
-	add("mandafro")
+	add("kebede")
+	add("kebede")
 
 	// back to slice
 	out := make([]string, 0, len(alts))
@@ -510,14 +510,14 @@ func ebirrReceiverVariantsDisplay() []string {
 	base := AllowedEBirrReceiverName
 	out = append(out, add(base)...)
 	// the two full-name spellings
-	if !strings.EqualFold(base, "Henok Belay Mandefro") {
-		out = append(out, "Henok Belay Mandefro")
+	if !strings.EqualFold(base, "sisay mamo kebede") {
+		out = append(out, "sisay mamo kebede")
 	}
-	if !strings.EqualFold(base, "Henok Belay Mandafro") {
-		out = append(out, "Henok Belay Mandafro")
+	if !strings.EqualFold(base, "sisay mamo kebede") {
+		out = append(out, "sisay mamo kebede")
 	}
 	// surname-only options
-	out = append(out, "Mandefro", "Mandafro")
+	out = append(out, "kebede", "kebede")
 	return out
 }
 
@@ -3519,13 +3519,10 @@ func sendDepositMethods(bot *tgbotapi.BotAPI, chatID int64) {
 			tgbotapi.NewInlineKeyboardButtonData("Telebirr", "dep:telebirr_agent"),
 			tgbotapi.NewInlineKeyboardButtonData("CBE", "dep:niged_bank_agent"),
 		),
-		// tgbotapi.NewInlineKeyboardRow(
-		// 	tgbotapi.NewInlineKeyboardButtonData("EBIRR", "dep:e_birr_agent"),
-		// 	tgbotapi.NewInlineKeyboardButtonData("BOA", "dep:boa_agent"),
-		// ),
-		// tgbotapi.NewInlineKeyboardRow(
-		// 	tgbotapi.NewInlineKeyboardButtonData("Awash", "dep:awash_agent"),
-		// ),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("EBIRR", "dep:e_birr_agent"),
+			tgbotapi.NewInlineKeyboardButtonData("BOA", "dep:boa_agent"),
+		),
 	}
 	m := tgbotapi.NewMessage(chatID, "Please select the bank option you wish to use for the top-up.")
 	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
@@ -4446,10 +4443,10 @@ func main() {
 			bot.Send(tgbotapi.NewMessage(chatID, "Pick a stake → choose a board → select numbers."))
 			continue
 		case "☎️ Contact Us":
-			bot.Send(tgbotapi.NewMessage(chatID, "Support: @support1288"))
+			bot.Send(tgbotapi.NewMessage(chatID, "Support: 0915000218"))
 			continue
 		case "👥 Join Us":
-			bot.Send(tgbotapi.NewMessage(chatID, "Join our channel: t.me/sisaybingo"))
+			bot.Send(tgbotapi.NewMessage(chatID, "Join our channel: @SisayBingoBot"))
 			continue
 		}
 

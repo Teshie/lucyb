@@ -2728,6 +2728,7 @@ func (rc *roomConn) readPump() {
 					b2 = &bs[1]
 				}
 				_ = upsertRoomPlayerWithTwo(rc.room.RoomID, rc.tid, b1, b2)
+				rc.room.maybeStartCountdown()
 				saveRoomStateToDB(rc.room)
 				rc.room.broadcastRoomStateToConns()
 				globalRoomsHub.broadcastRooms()
@@ -2744,6 +2745,7 @@ func (rc *roomConn) readPump() {
 					b2 = &bs[1]
 				}
 				_ = upsertRoomPlayerWithTwo(rc.room.RoomID, rc.tid, b1, b2)
+				rc.room.maybeStartCountdown()
 				saveRoomStateToDB(rc.room)
 				rc.room.broadcastRoomStateToConns()
 				globalRoomsHub.broadcastRooms()
@@ -2777,6 +2779,7 @@ func (rc *roomConn) readPump() {
 					b2 = &bs[1]
 				}
 				_ = upsertRoomPlayerWithTwo(rc.room.RoomID, rc.tid, b1, b2)
+				rc.room.maybeStartCountdown()
 				saveRoomStateToDB(rc.room)
 				rc.room.broadcastRoomStateToConns()
 				globalRoomsHub.broadcastRooms()
@@ -2792,6 +2795,7 @@ func (rc *roomConn) readPump() {
 					b2 = &bs[1]
 				}
 				_ = upsertRoomPlayerWithTwo(rc.room.RoomID, rc.tid, b1, b2)
+				rc.room.maybeStartCountdown()
 				saveRoomStateToDB(rc.room)
 				rc.room.broadcastRoomStateToConns()
 				globalRoomsHub.broadcastRooms()
@@ -2851,6 +2855,11 @@ func (rc *roomConn) readPump() {
 			rc.room.ownerBoards[rc.tid] = tb
 			rc.room.recomputePossibleWinLocked()
 			rc.room.mu.Unlock()
+
+			rc.room.maybeStartCountdown()
+			saveRoomStateToDB(rc.room)
+			rc.room.broadcastRoomStateToConns()
+			globalRoomsHub.broadcastRooms()
 
 			// Clear in DB asynchronously
 			roomID := rc.room.RoomID
